@@ -1,0 +1,157 @@
+version: "3.9"
+
+# ============================================================
+# Agentic CRM — Phase 1 Docker Compose
+#
+# Follows the frappe_docker pattern.
+# Run: docker compose --env-file .env up -d
+#
+# First-time ERPNext setup:
+#   docker compose exec backend bench new-site crm.local \
+#     --mariadb-root-password root \
+#     --admin-password admin \
+#     --install-app erpnext
+#   docker compose exec backend bench --site crm.local migrate
+# ============================================================
+
+x-frappe-defaults: &frappe-defaults
+  image: frappe/erpnext:v15
+  restart: unless-stopped
+  environment:
+    DB_HOST: db
+    DB_PORT: "3306"
+    REDIS_CACHE: redis-cache:6379
+    REDIS_QUEUE: redis-queue:6379
+    SOCKETIO_PORT: "9000"
+  volumes:
+    - frappe-sites:/home/frappe/frappe-bench/sites
+    - frappe-logs:/home/frappe/frappe-bench/logs
+  depends_on:
+    db:
+      condition: service_healthy
+    redis-cache:
+      condition: service_started
+    redis-queue:
+      condition: service_started
+
+services:
+  # ── MariaDB ─────────────────────────────────────────────────
+  db:
+    image: mariadb:10.6
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --skip-innodb-read-only-compressed
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: _placeholder
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis cache ─────────────────────────────────────────────
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-cache-data:/data
+
+  # ── Redis queue ─────────────────────────────────────────────
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-queue-data:/data
+
+  # ── Frappe backend (web + worker) ───────────────────────────
+  backend:
+    <<: *frappe-defaults
+    command: nginx-entrypoint.sh
+    # The backend container serves the Frappe/ERPNext API
+    # We override to run gunicorn directly:
+    entrypoint: []
+    command: >
+      bash -c "
+        bench set-config -g db_host db &&
+        bench set-config -g redis_cache redis://redis-cache:6379 &&
+        bench set-config -g redis_queue redis://redis-queue:6379 &&
+        bench serve --port 8000
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/method/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ── Frappe queue worker (default) ───────────────────────────
+  queue-worker-default:
+    <<: *frappe-defaults
+    command: bench worker --queue default
+
+  # ── Frappe queue worker (long) ──────────────────────────────
+  queue-worker-long:
+    <<: *frappe-defaults
+    command: bench worker --queue long
+
+  # ── Frappe scheduler ────────────────────────────────────────
+  scheduler:
+    <<: *frappe-defaults
+    command: bench schedule
+
+  # ── Nginx frontend (reverse proxy to ERPNext) ───────────────
+  frontend:
+    image: frappe/erpnext:v15
+    restart: unless-stopped
+    command: nginx-entrypoint.sh
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: crm.local
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: "120"
+      CLIENT_MAX_BODY_SIZE: 50m
+    volumes:
+      - frappe-sites:/home/frappe/frappe-bench/sites
+    ports:
+      - "8080:8080"
+    depends_on:
+      - backend
+
+  # ── WebSocket (Socket.IO) ────────────────────────────────────
+  websocket:
+    <<: *frappe-defaults
+    command: node /home/frappe/frappe-bench/apps/frappe/socketio.js
+
+  # ── Integration service (FastAPI) ───────────────────────────
+  integration:
+    build:
+      context: ./integration
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ERPNEXT_BASE_URL: http://frontend:8080
+    ports:
+      - "8001:8001"
+    depends_on:
+      - frontend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mariadb-data:
+  frappe-sites:
+  frappe-logs:
+  redis-cache-data:
+  redis-queue-data:
