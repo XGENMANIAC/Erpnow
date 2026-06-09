@@ -1,6 +1,14 @@
-# Agentic CRM — Phase 1
+# DEWMIX Hardware — Agentic CRM
 
-An agentic CRM system built on top of ERPNext, designed for Kenyan SMEs.
+AI-powered WhatsApp sales and order management for **DEWMIX Hardware**, Nyeri Highway, Kenya.
+
+**Business:** 3,000+ hardware products across Tools, Pipes, Bathroom Fittings, Locks, Nails,
+Paints, Electricals, and Roofing. WhatsApp: **+254 787 151 516**.
+
+**What this system does:** AI agents handle WhatsApp conversations, take orders, generate
+invoices, and trigger M-Pesa payment — all backed by ERPNext as the authoritative source of
+stock, pricing, and accounting. The existing website (`dewmix-hardware.vercel.app`) is
+integrated via the website quote webhook (Phase 6).
 
 ## Architecture
 
@@ -69,7 +77,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-### 3. First-time ERPNext setup
+### 3. ERPNext — DEWMIX configuration
 
 ```bash
 # Create the site
@@ -86,13 +94,32 @@ docker compose exec backend bench --site crm.local set-config developer_mode 1
 docker compose restart frontend
 ```
 
-### 4. Configure ERPNext API credentials
+### 4. Configure ERPNext for DEWMIX Hardware
 
+After first-time setup, perform these DEWMIX-specific steps in the ERPNext desk UI:
+
+**Company & Currency**
+- Company name: `DEWMIX Hardware`
+- Default currency: `KES`
+- Create a `Standard Selling` price list in KES
+
+**Warehouses** (Inventory → Warehouses)
+- Create `Stores - DX` as the main stock warehouse
+
+**Tax template** (Accounting → Tax → Sales Tax Template)
+- Create `Kenya VAT 16%`: Line item `Output Tax @ 16%`, account `VAT - DX`
+- Assign this template as default on Sales Order and Sales Invoice
+
+**Item Groups** (map to the 8 DEWMIX categories)
+- TOOLS, PIPES, BATHROOM N TOILETS, DOOR LOCKS, NAILS N SCREWS,
+  PAINTS, ELECTRICALS, ROOFING
+
+**API credentials**
 1. Log into ERPNext at http://localhost:8080 (user: `Administrator`, password: `admin`)
 2. Go to **Settings → API Access → Generate Keys**
 3. Copy the API Key and Secret into your `.env`
-4. Set `ERPNEXT_COMPANY` to match the company name in ERPNext
-5. Set `ERPNEXT_DEFAULT_WAREHOUSE` to an existing warehouse name
+4. Set `ERPNEXT_COMPANY=DEWMIX Hardware`
+5. Set `ERPNEXT_DEFAULT_WAREHOUSE=Stores - DX`
 
 ### 5. Custom field setup
 
@@ -184,10 +211,38 @@ pytest tests/ -v --cov=app --cov-report=term-missing
 
 Tests use `respx` to mock all HTTP calls to ERPNext — no live ERPNext instance needed.
 
+## Agent Prompts
+
+System prompts live in `integration/app/agents/prompts/` and are editable Markdown files.
+Each contains `[REVIEW]` markers where DEWMIX-specific business policy is needed:
+
+| File | Agent | Key `[REVIEW]` items |
+|---|---|---|
+| `conversation.md` | Customer chat (WhatsApp) | Tone, high-value threshold, escalation policy |
+| `orchestrator.md` | Intent → ERPNext tool calls | M-Pesa shortcode, high-value threshold |
+| `catalog.md` | Product Q&A | Exclusive brands, compatibility rules |
+| `collections.md` | Unpaid invoice follow-up | Credit terms, collection timeline |
+| `summary.md` | Daily ops recap | Recipient, cost alert threshold |
+| `support.md` | Post-sale support | Delivery radius, return policy |
+
+**Before Phase 4:** resolve all `[REVIEW]` items with the DEWMIX business owner.
+
 ## Phase Roadmap
 
 | Phase | Scope |
 |---|---|
-| **1 (this)** | ERPNext client layer, schemas, tests, Docker |
-| 2 | M-Pesa STK push, WhatsApp channel, LLM agent |
-| 3 | Web dashboard, advanced analytics, multi-company |
+| **1 (done)** | ERPNext client layer, schemas, 45 passing tests, Docker |
+| **2 (next)** | M-Pesa Daraja STK push + idempotent payment recording |
+| **3** | WhatsApp Cloud API channel + webhook gateway |
+| **4** | LLM agents (NIM) + orchestrator + guardrails + cost tracking |
+| **5** | Thin Next.js dashboard: live chats, human takeover, daily summary |
+| **6** | Collections agent, website buy button, extra channels (all behind flags) |
+
+## Website Integration
+
+The existing website `dewmix-hardware.vercel.app` already sends customers to WhatsApp for
+quotes. Phase 6 adds a **"Buy Now" webhook** from the website that enters the Phase 4 order
+flow directly — same ERPNext tools, no agent chat needed. Enabled via `FEATURE_WEBSITE_BUY=true`.
+
+The website's product images are stored in Supabase (project `rwlsugzbgnjbgxlzwnmz`).
+The `Supabase Storage` URLs can be attached to ERPNext Item records as the image field.
