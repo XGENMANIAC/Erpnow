@@ -1,8 +1,7 @@
 """
 FastAPI application entrypoint.
 
-Phase 1: exposes only /health and /info.
-Full REST API routes are wired in Phase 2 via app/api/.
+Phase 2: M-Pesa callback webhook wired; DB tables created on startup.
 """
 from __future__ import annotations
 
@@ -16,7 +15,6 @@ from app.config import settings
 
 logger = structlog.get_logger(__name__)
 
-# ── Sentry (only when DSN is configured) ────────────────────
 if settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
@@ -27,45 +25,66 @@ if settings.sentry_dsn:
 
 app = FastAPI(
     title="Agentic CRM Integration Service",
-    description="ERPNext integration layer for the Agentic CRM system (Phase 1)",
-    version="0.1.0",
+    description="ERPNext + M-Pesa integration layer for the Agentic CRM system",
+    version="0.2.0",
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
 )
 
+# ── Routers ───────────────────────────────────────────────────────────────────
+from app.api.mpesa_webhook import router as mpesa_router  # noqa: E402
 
-@app.get("/health", tags=["ops"])
-async def health() -> JSONResponse:
-    """Liveness probe — always 200 if the service is running."""
-    return JSONResponse({"status": "ok", "env": settings.app_env})
+app.include_router(mpesa_router)
 
 
-@app.get("/info", tags=["ops"])
-async def info() -> JSONResponse:
-    """Basic service information (non-sensitive)."""
-    return JSONResponse(
-        {
-            "service": "agentic-crm-integration",
-            "version": "0.1.0",
-            "phase": 1,
-            "erp_url": settings.erpnext_base_url,
-            "features": {
-                "website_buy": settings.feature_website_buy,
-                "extra_channels": settings.feature_extra_channels,
-            },
-        }
-    )
-
+# ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    # Best-effort DB table creation; failure is logged but does not abort startup
+    # so the service remains available when the DB is temporarily unreachable.
+    try:
+        from app.db.models import Base
+        from app.db.session import get_engine
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("db_tables_ready")
+    except Exception as exc:
+        logger.warning("db_init_failed", error=str(exc))
+
     logger.info(
         "service_starting",
         env=settings.app_env,
         erp_url=settings.erpnext_base_url,
+        phase=2,
     )
 
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
     logger.info("service_stopping")
+
+
+# ── Ops endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/health", tags=["ops"])
+async def health() -> JSONResponse:
+    return JSONResponse({"status": "ok", "env": settings.app_env})
+
+
+@app.get("/info", tags=["ops"])
+async def info() -> JSONResponse:
+    return JSONResponse(
+        {
+            "service": "agentic-crm-integration",
+            "version": "0.2.0",
+            "phase": 2,
+            "erp_url": settings.erpnext_base_url,
+            "features": {
+                "mpesa": bool(settings.mpesa_consumer_key),
+                "website_buy": settings.feature_website_buy,
+                "extra_channels": settings.feature_extra_channels,
+            },
+        }
+    )

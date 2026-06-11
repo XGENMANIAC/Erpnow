@@ -50,7 +50,15 @@ class Settings(BaseSettings):
     mpesa_consumer_secret: str = ""
     mpesa_shortcode: str = ""
     mpesa_passkey: str = ""
+    # Base callback URL; invoice name is appended per-request
     mpesa_callback_url: str = ""
+    # "sandbox" or "production"
+    mpesa_environment: str = "sandbox"
+    # Mode of Payment that exists in ERPNext (e.g. "Mobile Money")
+    mpesa_mode_of_payment: str = "Cash"
+    # Optional explicit account overrides (leave empty to use ERPNext defaults)
+    mpesa_debtors_account: str = ""
+    mpesa_paid_to_account: str = ""
 
     # ── Sentry ───────────────────────────────────────────────
     sentry_dsn: str = ""
