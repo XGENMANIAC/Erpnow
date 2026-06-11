@@ -15,14 +15,14 @@ from __future__ import annotations
 import json
 
 import structlog
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.gateway import ChannelGateway
 from app.channels.whatsapp import verify_signature
 from app.config import settings
-from app.db.session import get_session
+from app.db.session import get_session, get_session_factory
 
 logger = structlog.get_logger(__name__)
 
@@ -61,9 +61,42 @@ async def verify_webhook(
 
 # ── Inbound webhook ───────────────────────────────────────────────────────────
 
+async def _run_agent_background(
+    conversation_id: int,
+    waid: str,
+    message_text: str,
+) -> None:
+    """
+    Background task: run the agent in its own DB session.
+
+    The request-scoped session has already been committed and closed by the
+    time this runs, so we open a fresh one from the factory.
+    """
+    from app.agents.router import AgentRouter
+
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
+            router_instance = AgentRouter()
+            await router_instance.handle(
+                conversation_id=conversation_id,
+                waid=waid,
+                user_message=message_text,
+                session=session,
+            )
+            await session.commit()
+        except Exception as exc:
+            logger.error(
+                "agent_background_error",
+                conversation_id=conversation_id,
+                error=str(exc),
+            )
+
+
 @router.post("/webhook")
 async def receive_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
     """
@@ -93,6 +126,17 @@ async def receive_webhook(
     try:
         processed = await gateway.handle_inbound("whatsapp", payload, session)
         logger.info("whatsapp_webhook_ok", processed=len(processed))
+
+        # Trigger the agent for each stored inbound text message
+        for msg_summary in processed:
+            if msg_summary.get("text"):
+                background_tasks.add_task(
+                    _run_agent_background,
+                    conversation_id=msg_summary["conversation_id"],
+                    waid=msg_summary["waid"],
+                    message_text=msg_summary["text"],
+                )
+
         return JSONResponse({"ok": True, "processed": len(processed)})
     except Exception as exc:
         logger.error("whatsapp_gateway_error", error=str(exc))
