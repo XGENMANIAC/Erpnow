@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import json
 import re
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.db.models import Base
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
@@ -229,3 +233,23 @@ def mock_create_quotation(respx_mock):
         return_value=_erp_ok(QUOTATION_DATA)
     )
     return QUOTATION_DATA
+
+
+# ── In-memory SQLite DB fixture (Phase 3+ tests) ──────────────────────────────
+
+@pytest_asyncio.fixture
+async def test_db_session() -> AsyncSession:
+    """
+    Yield an AsyncSession backed by an in-memory SQLite DB.
+
+    Tables are created fresh for each test and dropped on teardown.
+    """
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    async with factory() as session:
+        yield session
+
+    await engine.dispose()

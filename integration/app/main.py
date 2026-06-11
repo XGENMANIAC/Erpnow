@@ -25,16 +25,18 @@ if settings.sentry_dsn:
 
 app = FastAPI(
     title="Agentic CRM Integration Service",
-    description="ERPNext + M-Pesa integration layer for the Agentic CRM system",
-    version="0.2.0",
+    description="ERPNext + M-Pesa + WhatsApp integration layer for the Agentic CRM system",
+    version="0.3.0",
     docs_url="/docs" if not settings.is_production else None,
     redoc_url="/redoc" if not settings.is_production else None,
 )
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 from app.api.mpesa_webhook import router as mpesa_router  # noqa: E402
+from app.api.whatsapp_webhook import router as whatsapp_router  # noqa: E402
 
 app.include_router(mpesa_router)
+app.include_router(whatsapp_router)
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -78,8 +80,8 @@ async def info() -> JSONResponse:
     return JSONResponse(
         {
             "service": "agentic-crm-integration",
-            "version": "0.2.0",
-            "phase": 2,
+            "version": "0.3.0",
+            "phase": 3,
             "erp_url": settings.erpnext_base_url,
             "features": {
                 "mpesa": bool(settings.mpesa_consumer_key),
