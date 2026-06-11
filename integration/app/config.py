@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     erpnext_base_url: str = "http://localhost:8080"
     erpnext_api_key: str = ""
     erpnext_api_secret: str = ""
-    erpnext_company: str = "My Company"
-    erpnext_default_warehouse: str = "Stores - MC"
+    erpnext_company: str = "DEWMIX Hardware"
+    erpnext_default_warehouse: str = "Stores - DX"
     erpnext_price_list: str = "Standard Selling"
+    # Name of an existing Sales Taxes and Charges Template in ERPNext.
+    # We reference it by name; ERPNext applies it and computes the tax.
+    erpnext_sales_taxes_template: str = ""
     erpnext_webhook_secret: str = ""
 
     # ── Database ─────────────────────────────────────────────

@@ -10,3 +10,4 @@ build/
 venv/
 node_modules/
 .next/
+.env.key

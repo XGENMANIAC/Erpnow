@@ -34,14 +34,39 @@ def _items_payload(items: list[OrderItem]) -> list[dict]:
     return rows
 
 
+async def _expand_tax_template(client: ERPNextClient, template_name: str) -> list[dict]:
+    """
+    Ask ERPNext to expand a Sales Taxes and Charges Template into its rows.
+
+    REST inserts do not auto-expand the `taxes_and_charges` link into the
+    `taxes` child table the way the desk UI does, so we fetch the rows via
+    ERPNext's own server method and attach them. ERPNext still computes the
+    actual tax AMOUNTS (rate × net total) when the document is submitted —
+    we never compute money here.
+    """
+    result = await client.post(
+        "/api/method/erpnext.controllers.accounts_controller.get_taxes_and_charges",
+        json={
+            "master_doctype": "Sales Taxes and Charges Template",
+            "master_name": template_name,
+        },
+    )
+    rows = result.get("message", result) if isinstance(result, dict) else result
+    return rows if isinstance(rows, list) else []
+
+
 async def create_quotation(
     client: ERPNextClient,
     customer: str,
     items: list[OrderItem],
     idempotency_key: str,
+    taxes_template: str | None = None,
 ) -> dict:
     """
     Create a draft Quotation in ERPNext.
+
+    `taxes_template` is the NAME of an existing Sales Taxes and Charges
+    Template; ERPNext applies it and computes the tax.
 
     Returns a dict with:
       - "quotation": ERPQuotation
@@ -55,6 +80,9 @@ async def create_quotation(
         "items": _items_payload(items),
         "order_type": "Sales",
     }
+    if taxes_template:
+        payload["taxes_and_charges"] = taxes_template
+        payload["taxes"] = await _expand_tax_template(client, taxes_template)
 
     try:
         data = await client.post(
@@ -95,12 +123,18 @@ async def create_sales_order(
     items: list[OrderItem],
     idempotency_key: str,
     delivery_date: date | None = None,
+    taxes_template: str | None = None,
 ) -> dict:
     """
     Create and submit a Sales Order in ERPNext.
 
     The order is automatically submitted (docstatus=1) so it can be
     invoiced.  ERPNext computes all totals and taxes.
+
+    `taxes_template` is the NAME of a Sales Taxes and Charges Template that
+    already exists in ERPNext (e.g. "Kenya VAT 16% - DX"). We only reference
+    it — ERPNext applies the template and computes the actual tax amounts.
+    The Sales Invoice created from this order inherits the same taxes.
 
     Returns a dict with:
       - "order": ERPSalesOrder (docstatus=1)
@@ -116,6 +150,11 @@ async def create_sales_order(
         "items": _items_payload(items),
         "order_type": "Sales",
     }
+    if taxes_template:
+        # Reference the template by name and attach its expanded rows; ERPNext
+        # computes the actual tax amounts (rate × net) when the order submits.
+        payload["taxes_and_charges"] = taxes_template
+        payload["taxes"] = await _expand_tax_template(client, taxes_template)
 
     # Step 1: Create draft
     try:

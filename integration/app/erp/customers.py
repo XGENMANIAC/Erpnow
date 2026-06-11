@@ -34,6 +34,8 @@ async def find_or_create_customer(
     phone: str,
     name: str | None = None,
     idempotency_key: str | None = None,
+    customer_group: str = "Individual",
+    territory: str = "Kenya",
 ) -> ERPCustomer:
     """
     Look up a Customer by phone number; create one if not found.
@@ -41,6 +43,11 @@ async def find_or_create_customer(
     Phone is normalized to +254XXXXXXXXX before searching or storing.
     The idempotency_key is forwarded to the POST call so concurrent
     requests for the same new customer collapse safely.
+
+    `customer_group` must be a NON-GROUP (leaf) Customer Group in ERPNext —
+    "All Customer Groups" is a group/parent node and ERPNext rejects it.
+    Defaults to "Individual", which exists as a leaf group in a standard
+    ERPNext install and suits WhatsApp retail customers.
     """
     normalized = _normalize_phone(phone)
 
@@ -75,8 +82,8 @@ async def find_or_create_customer(
         "doctype": "Customer",
         "customer_name": customer_name,
         "customer_type": "Individual",
-        "customer_group": "All Customer Groups",
-        "territory": "Kenya",
+        "customer_group": customer_group,
+        "territory": territory,
         "mobile_no": normalized,
         "custom_phone": normalized,
     }

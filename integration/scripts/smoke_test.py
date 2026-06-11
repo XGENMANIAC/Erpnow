@@ -89,6 +89,7 @@ async def run() -> int:
     api_secret = os.environ["ERPNEXT_API_SECRET"]
     warehouse = os.environ["ERPNEXT_DEFAULT_WAREHOUSE"]
     price_list = os.environ["ERPNEXT_PRICE_LIST"]
+    taxes_template = os.environ.get("ERPNEXT_SALES_TAXES_TEMPLATE", "") or None
     print(f"  Target: {base_url}")
 
     section("1. Authentication")
@@ -155,6 +156,7 @@ async def run() -> int:
                 client, customer_name,
                 [OrderItem(item_code=first_item_code, qty=Decimal("1"))],
                 idempotency_key=f"smoke:{run_id}:so",
+                taxes_template=taxes_template,
             )
             order = so_result["order"]
             bd = so_result["total_breakdown"]

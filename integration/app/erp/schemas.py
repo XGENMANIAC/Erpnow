@@ -19,7 +19,7 @@ class ERPCustomer(BaseModel):
     mobile_no: str | None = None
     custom_phone: str | None = None
     customer_type: str = "Individual"
-    customer_group: str = "All Customer Groups"
+    customer_group: str = "Individual"  # must be a non-group (leaf) Customer Group
     territory: str = "Kenya"
 
 
