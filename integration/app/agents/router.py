@@ -7,11 +7,13 @@ is stored to the DB.
 from __future__ import annotations
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.conversation import AgentResponse, ConversationAgent
 from app.agents.orchestrator import Orchestrator
 from app.channels.gateway import ChannelGateway
+from app.db.models import Conversation
 
 logger = structlog.get_logger(__name__)
 
@@ -56,10 +58,24 @@ class AgentRouter:
     ) -> None:
         """
         Process one message for a conversation:
+          0. Check if conversation is in human mode — if so, skip the agent
           1. Run ConversationAgent → AgentResponse
           2. If order_confirmed → run Orchestrator → compose payment message
           3. Dispatch reply via ChannelGateway
         """
+        # ── Human-mode guard ──────────────────────────────────────────────────
+        result = await session.execute(
+            select(Conversation.status).where(Conversation.id == conversation_id)
+        )
+        conv_status = result.scalar_one_or_none()
+        if conv_status == "human":
+            logger.info(
+                "agent_skipped_human_mode",
+                conversation_id=conversation_id,
+                waid=waid,
+            )
+            return
+
         erp_client = _make_erp_client(self._settings)
         nim_client = _make_nim_client(self._settings)
         gateway = ChannelGateway()
